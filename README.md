@@ -1,184 +1,302 @@
-# FORGE-Guard | Elderly Monitoring System
+# 🔥 FORGE-Guard
 
-<div align="center">
+## Elderly Safety Monitoring System
 
-![FORGE-Guard](https://img.shields.io/badge/FORGE--Guard-v1.0.0-orange?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python)
-![MediaPipe](https://img.shields.io/badge/MediaPipe-Edge_AI-green?style=for-the-badge)
-![FastAPI](https://img.shields.io/badge/FastAPI-Backend-teal?style=for-the-badge&logo=fastapi)
+**AI-Powered Real-Time Protection for Your Loved Ones**
 
-**Real-time, modular elderly monitoring system with web dashboard**
-
-</div>
+[![Python](https://img.shields.io/badge/Python-3.10%20|%203.11-blue.svg)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)]()
 
 ---
 
-## 🔥 Features
-
-- **Fall Detection** - MediaPipe Pose + geometry analysis (ratio < 0.8 for 5 frames)
-- **Medicine Box Monitoring** - ROI-based background subtraction
-- **Emergency SOS Gesture** - Open palm detection (3-second hold)
-- **Object Detection** - YOLOv8-nano for persons, wheelchairs, walking sticks
-- **Real-time Alerts** - Twilio SMS/Call + local logging
-- **Web Dashboard** - Streamlit UI with FORGE dark theme
-- **Multi-threaded Pipeline** - Producer-consumer pattern at 30 FPS
+<p align="center">
+  <img src="https://img.shields.io/badge/🚨-Fall%20Detection-red?style=for-the-badge" alt="Fall Detection"/>
+  <img src="https://img.shields.io/badge/🖐️-Gesture%20Recognition-orange?style=for-the-badge" alt="Gesture Recognition"/>
+  <img src="https://img.shields.io/badge/💊-Medicine%20Tracking-blue?style=for-the-badge" alt="Medicine Tracking"/>
+  <img src="https://img.shields.io/badge/👁️-Object%20Detection-purple?style=for-the-badge" alt="Object Detection"/>
+</p>
 
 ---
 
-## 🚀 Quick Start
+## ⚡ One-Click Setup
 
-### Installation
+### Windows
+```batch
+# Just run the setup script!
+setup.bat
+```
+
+### Then start the system:
+```batch
+run.bat
+```
+
+That's it! The system will:
+1. ✅ Create a virtual environment
+2. ✅ Install all dependencies
+3. ✅ Configure settings
+4. ✅ Launch the dashboard
+
+---
+
+## 🎯 Features
+
+### 🚨 Fall Detection
+- **MediaPipe Pose Estimation** for accurate body tracking
+- **Real-time monitoring** with instant alerts
+- **Confirmation system** to reduce false positives
+- **Configurable sensitivity** via Admin Panel
+
+### 🖐️ Gesture Recognition
+- **SOS Signal**: Wave both hands above head
+- **Help Request**: Raise one hand and hold
+- **Thumbs Up**: Acknowledgment gesture
+- **Configurable hold time** for confirmation
+
+### 💊 Medicine Monitoring
+- **Zone-based tracking** - click to create zones
+- **Visual change detection** in medicine areas
+- **Schedule tracking** for medication compliance
+- **Caregiver notifications** when medicine is taken
+
+### 👁️ Object Detection (YOLO)
+- **Person detection** for room occupancy
+- **Safety object detection**
+- **Real-time inference** with YOLOv8
+
+### 🔔 Multi-Channel Alerts
+- **Dashboard notifications** with sound
+- **SMS alerts** via Twilio
+- **Voice calls** for critical alerts
+- **Email notifications** (configurable)
+
+---
+
+## 🖥️ Screenshots
+
+### Dashboard
+```
+┌──────────────────────────────────────────────────────────┐
+│                 🔥 FORGE-Guard Dashboard                 │
+├──────────────────────────────────────────────────────────┤
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐        │
+│  │🚨 FALL  │ │🖐️ GESTURE│ │💊 MEDS  │ │👁️ DETECT │        │
+│  │ ACTIVE  │ │ ACTIVE  │ │ ACTIVE  │ │ ACTIVE  │        │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘        │
+├──────────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────────┐  │
+│  │                                                    │  │
+│  │              📹 LIVE VIDEO FEED                    │  │
+│  │                                                    │  │
+│  │    [Click to create monitoring zones]              │  │
+│  │                                                    │  │
+│  └────────────────────────────────────────────────────┘  │
+├──────────────────────────────────────────────────────────┤
+│  📋 Event Log               🚨 Alerts                    │
+│  ─────────────              ─────────                    │
+│  10:23:45 | Fall Detector   ✅ No active alerts         │
+│  10:23:44 | System          System online               │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🛠️ Requirements
+
+### Recommended Setup
+- **Python 3.10 or 3.11** (for MediaPipe compatibility)
+- **Webcam** (built-in or USB)
+- **4GB+ RAM** recommended
+- **Windows 10/11** (macOS/Linux also supported)
+
+### Dependencies (auto-installed)
+- OpenCV, MediaPipe, NumPy
+- FastAPI, Uvicorn, Streamlit
+- Ultralytics (YOLOv8)
+- Twilio (optional, for SMS/calls)
+
+---
+
+## 📦 Manual Installation
+
+If you prefer manual setup:
 
 ```bash
-# Clone or navigate to project
-cd "hackathon project redo"
+# 1. Clone the repository
+git clone https://github.com/NINJA981/gaurdian.git
+cd gaurdian
 
-# Create virtual environment
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
+# 2. Create virtual environment
+python -m venv .venv
 
-# Install dependencies
+# 3. Activate virtual environment
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# 4. Install dependencies
 pip install -r requirements.txt
-```
 
-### Configuration
-
-```bash
-# Copy environment template
-copy .env.example .env
-
-# Edit .env with your Twilio credentials (optional)
-```
-
-### Running
-
-```bash
-# Start both API and Dashboard
+# 5. Run the application
 python main.py
-
-# Or start separately:
-python main.py --api-only       # API only (port 8000)
-python main.py --dashboard-only # Dashboard only (port 8501)
-```
-
-### Access
-
-- **Dashboard**: http://localhost:8501
-- **API Docs**: http://localhost:8000/docs
-- **Video Stream**: http://localhost:8000/stream
-
----
-
-## 📁 Project Structure
-
-```
-forge_guard/
-├── main.py                 # Entry point
-├── requirements.txt        # Dependencies
-├── forge_guard/
-│   ├── config.py          # Configuration management
-│   ├── pipeline/          # Video processing
-│   │   ├── video_pipeline.py
-│   │   └── frame_buffer.py
-│   ├── detectors/         # Detection modules
-│   │   ├── base_detector.py
-│   │   ├── fall_detector.py
-│   │   ├── medicine_monitor.py
-│   │   ├── gesture_detector.py
-│   │   └── object_detector.py
-│   ├── alerts/            # Notification system
-│   │   ├── notification_manager.py
-│   │   └── event_logger.py
-│   ├── api/               # FastAPI backend
-│   │   └── server.py
-│   └── dashboard/         # Streamlit UI
-│       └── app.py
-└── tests/                 # Unit tests
 ```
 
 ---
 
-## 🎛️ Detection Modules
+## ⚙️ Configuration
 
-| Module | Technology | Trigger Condition |
-|--------|------------|-------------------|
-| Fall Detection | MediaPipe Pose | Width/Height ratio < 0.8 for 5 frames |
-| Medicine Monitor | Background Subtraction | Pixel change > 20% in ROI |
-| SOS Gesture | MediaPipe Hands | Open palm held for 3 seconds |
-| Object Detection | YOLOv8-nano | Confidence > 50% |
+### Environment Variables
 
----
-
-## 🔧 Configuration
-
-Edit `.env` or environment variables:
+Create a `.env` file or edit the existing one:
 
 ```env
-# Twilio (optional)
-TWILIO_ACCOUNT_SID=your_sid
-TWILIO_AUTH_TOKEN=your_token
+# Server Settings
+API_HOST=0.0.0.0
+API_PORT=8000
+STREAMLIT_PORT=8501
+
+# Detection Settings
+FALL_DETECTION_ENABLED=true
+GESTURE_DETECTION_ENABLED=true
+MEDICINE_MONITORING_ENABLED=true
+OBJECT_DETECTION_ENABLED=true
+
+# Alert Settings
+ALERT_COOLDOWN_SECONDS=30
+
+# Twilio (Optional - for SMS/Call alerts)
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_AUTH_TOKEN=your_auth_token
 TWILIO_PHONE_NUMBER=+1234567890
-EMERGENCY_CONTACT_NUMBER=+0987654321
+EMERGENCY_CONTACT=+1234567890
+```
 
-# Detection thresholds
-FALL_RATIO_THRESHOLD=0.8
-GESTURE_HOLD_SECONDS=3
-MEDICINE_CHANGE_THRESHOLD=0.2
+### Admin Panel
 
-# Video settings
-VIDEO_WIDTH=1280
-VIDEO_HEIGHT=720
-VIDEO_FPS=30
+Access all settings through the web interface:
+1. Open http://localhost:8501
+2. Click **⚙️ Admin Panel** in sidebar
+3. Login with password: `forge2024` (change this!)
+4. Configure all detection parameters
+
+---
+
+## 📡 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Status page |
+| `/stream` | GET | MJPEG video stream |
+| `/api/status` | GET | System status |
+| `/api/events` | GET | Recent events |
+| `/api/alerts` | GET | Recent alerts |
+| `/api/config` | GET/PATCH | Configuration |
+| `/api/zones` | GET/POST/DELETE | Zone management |
+| `/ws/events` | WebSocket | Real-time events |
+
+Full API documentation: http://localhost:8000/docs
+
+---
+
+## 🗂️ Project Structure
+
+```
+forge-guard/
+├── 📄 main.py              # Application entry point
+├── 📄 setup.bat            # One-click Windows setup
+├── 📄 run.bat              # Quick start script
+├── 📄 requirements.txt     # Python dependencies
+├── 📄 .env.example         # Environment template
+│
+├── 📁 forge_guard/         # Main package
+│   ├── 📄 config.py        # Configuration management
+│   │
+│   ├── 📁 detectors/       # AI Detection modules
+│   │   ├── 📄 fall_detector.py      # Fall detection
+│   │   ├── 📄 gesture_detector.py   # Gesture recognition
+│   │   ├── 📄 medicine_monitor.py   # Medicine tracking
+│   │   └── 📄 object_detector.py    # YOLO detection
+│   │
+│   ├── 📁 dashboard/       # Streamlit UI
+│   │   └── 📄 app.py       # Main dashboard
+│   │
+│   ├── 📁 api/             # FastAPI backend
+│   │   └── 📄 server.py    # REST API
+│   │
+│   ├── 📁 alerts/          # Notification system
+│   │   ├── 📄 notification_manager.py
+│   │   └── 📄 event_logger.py
+│   │
+│   └── 📁 pipeline/        # Video processing
+│       ├── 📄 video_pipeline.py
+│       └── 📄 frame_buffer.py
+│
+├── 📁 tests/               # Unit tests
+├── 📁 logs/                # Application logs
+└── 📁 docs/                # Documentation
 ```
 
 ---
 
-## 📹 Setting Up Zones
+## 🔧 Troubleshooting
 
-1. Open dashboard at http://localhost:8501
-2. In sidebar, expand "➕ Add New Zone"
-3. Enter zone name (e.g., "medicine_tray")
-4. Set X, Y, Width, Height coordinates
-5. Click "Create Zone"
-6. System auto-captures reference on first detection
+### MediaPipe Not Working?
 
----
+MediaPipe requires Python 3.10 or 3.11. Check your version:
+```bash
+python --version
+```
 
-## 🧪 Testing
+If using Python 3.12+, install compatible versions:
+```bash
+pip install mediapipe==0.10.9
+```
+
+### Camera Not Detected?
+
+1. Check camera is connected
+2. Close other apps using the camera
+3. Try a different camera index in settings
+
+### Port Already in Use?
 
 ```bash
-# Run all tests
-python -m pytest tests/ -v
+# Find process using port 8501
+netstat -ano | findstr :8501
 
-# Run specific test
-python -m pytest tests/test_fall_detector.py -v
+# Kill the process
+taskkill /PID <process_id> /F
 ```
 
 ---
 
-## ⚡ Performance
+## 🤝 Contributing
 
-Optimized for edge devices:
-- **Laptop/Desktop**: 30 FPS @ 1280x720
-- **Raspberry Pi 4**: 15-20 FPS @ 640x480
-- **YOLOv8-nano**: 3MB model, ~20ms inference
-
-For Raspberry Pi, update `.env`:
-```env
-VIDEO_WIDTH=640
-VIDEO_HEIGHT=480
-VIDEO_FPS=15
-```
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
 ---
 
-## 🛡️ License
+## 📜 License
 
-MIT License - See LICENSE file
+MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 
-<div align="center">
-Built with 🔥 by FORGE-Guard Team
-</div>
+## 🙏 Acknowledgments
+
+- **MediaPipe** by Google for pose/hand estimation
+- **Ultralytics** for YOLOv8
+- **Streamlit** for the dashboard framework
+- **FastAPI** for the backend API
+
+---
+
+<p align="center">
+  <strong>Built with ❤️ for elderly safety</strong><br>
+  <em>FORGE-Guard - Because every second counts</em>
+</p>
