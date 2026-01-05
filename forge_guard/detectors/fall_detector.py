@@ -134,7 +134,7 @@ class FallDetector(BaseDetector):
             logger.error(f"[FALL] Failed to initialize Pose: {e}")
             self._enabled = False
     
-    def process(self, frame: np.ndarray) -> DetectionResult:
+    def _process_frame(self, frame: np.ndarray) -> DetectionResult:
         """
         Process a frame for fall detection.
         
@@ -144,7 +144,6 @@ class FallDetector(BaseDetector):
         Returns:
             DetectionResult with detection status and metadata
         """
-        self._frames_processed += 1
         current_time = time.time()
         
         # Check if detector is enabled
@@ -197,8 +196,6 @@ class FallDetector(BaseDetector):
             fall_detected, fall_reason = self._check_for_fall(metrics, current_time)
             
             if fall_detected:
-                self._detections_count += 1
-                self._last_detection_time = current_time
                 
                 # Check confirmation time
                 if self._fall_detected_time is None:

@@ -136,7 +136,7 @@ class GestureDetector(BaseDetector):
             logger.error(f"[GESTURE] Failed to initialize Hands: {e}")
             self._enabled = False
     
-    def process(self, frame: np.ndarray) -> DetectionResult:
+    def _process_frame(self, frame: np.ndarray) -> DetectionResult:
         """
         Process a frame for gesture detection.
         

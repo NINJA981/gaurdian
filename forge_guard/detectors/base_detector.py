@@ -29,6 +29,7 @@ class DetectionResult:
     message: str = ""
     timestamp: float = field(default_factory=time.time)
     details: Dict[str, Any] = field(default_factory=dict)
+    bounding_box: Optional[Tuple[int, int, int, int]] = None  # Single box
     bounding_boxes: List[Tuple[int, int, int, int]] = field(default_factory=list)
     keypoints: List[Tuple[int, int]] = field(default_factory=list)
     
