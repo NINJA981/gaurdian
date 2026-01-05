@@ -1,0 +1,34 @@
+# FORGE-Guard - Elderly Monitoring System Dependencies
+
+# Core Computer Vision
+opencv-python
+mediapipe
+numpy>=2.0.0
+
+# YOLOv8 for Object Detection
+ultralytics
+
+# Web Framework
+fastapi
+uvicorn[standard]
+python-multipart
+websockets
+
+# Dashboard
+streamlit
+streamlit-webrtc
+
+# Notifications
+twilio
+
+# Utilities
+python-dotenv
+pydantic
+pydantic-settings
+
+# Async support
+aiofiles
+
+# Testing
+pytest
+pytest-asyncio
