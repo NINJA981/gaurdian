@@ -1,6 +1,7 @@
 """
 FORGE-Guard Enhanced Dashboard
 Premium UI with Glassmorphism, Admin Panel, and Interactive Zone Creation
+Production-ready with proper error handling and graceful degradation.
 """
 
 import streamlit as st
@@ -8,11 +9,19 @@ import requests
 import time
 import json
 import os
+import logging
 from datetime import datetime
-import cv2
-import numpy as np
-from PIL import Image
-import io
+
+# Optional imports with graceful degradation
+try:
+    from PIL import Image
+    import io
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
@@ -997,8 +1006,16 @@ def render_sidebar():
             refresh_rate = st.slider("Refresh Rate (s)", 0.5, 5.0, 
                                     st.session_state.settings['refresh_rate'])
             st.session_state.settings['refresh_rate'] = refresh_rate
-            time.sleep(refresh_rate)
-            st.rerun()
+            
+            # Use st.rerun with a timer instead of blocking sleep
+            # Store last refresh time in session state
+            if 'last_refresh' not in st.session_state:
+                st.session_state.last_refresh = time.time()
+            
+            # Only rerun if enough time has passed
+            if time.time() - st.session_state.last_refresh >= refresh_rate:
+                st.session_state.last_refresh = time.time()
+                st.rerun()
 
 def render_manual():
     """Render the manual/help page."""

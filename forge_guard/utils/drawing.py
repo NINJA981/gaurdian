@@ -3,10 +3,13 @@ FORGE-Guard Drawing Utilities
 Overlay drawing utilities for skeletons, bounding boxes, and zones.
 """
 
-import cv2
-import numpy as np
 from typing import Tuple, List, Optional
 from dataclasses import dataclass
+
+from .safe_imports import get_cv2, get_numpy
+
+cv2 = get_cv2()
+np = get_numpy()
 
 
 @dataclass

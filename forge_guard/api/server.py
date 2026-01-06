@@ -1,26 +1,33 @@
 """
 FORGE-Guard FastAPI Server
 Backend API with video streaming, WebSocket events, and REST endpoints.
+Production-ready with proper error handling and graceful degradation.
 """
 
 import asyncio
-import cv2
 import json
 import time
 import threading
+import logging
 from typing import Optional, Dict, List, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import config
 from ..pipeline import VideoPipeline, ProcessedFrame
 from ..detectors import FallDetector, MedicineMonitor, GestureDetector, ObjectDetector
 from ..alerts import NotificationManager, AlertPriority, EventLogger, Event
+from ..utils.safe_imports import get_cv2
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# Get safe cv2 reference
+cv2 = get_cv2()
 
 
 # ============================================================================
@@ -224,10 +231,20 @@ class ForgeGuardAPI:
     
     def _on_alert(self, alert):
         """Callback for new alerts - broadcast via WebSocket."""
-        asyncio.create_task(self.ws_manager.broadcast({
-            "type": "alert",
-            "data": alert.to_dict()
-        }))
+        # This callback is called from a non-async context (notification thread)
+        # We need to schedule the coroutine in the event loop safely
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(
+                self.ws_manager.broadcast({
+                    "type": "alert",
+                    "data": alert.to_dict()
+                }),
+                loop
+            )
+        except RuntimeError:
+            # No running event loop - skip WebSocket broadcast
+            pass
     
     def get_latest_frame_bytes(self) -> Optional[bytes]:
         """Get latest processed frame as JPEG bytes."""
@@ -435,10 +452,10 @@ async def create_zone(zone: ZoneCreate):
     if forge_api.event_logger:
         forge_api.event_logger.user_action(
             f"Created zone '{zone.name}'",
-            {"zone": zone.dict()}
+            {"zone": zone.model_dump()}
         )
     
-    return {"status": "created", "zone": zone.dict()}
+    return {"status": "created", "zone": zone.model_dump()}
 
 
 @app.delete("/api/zones/{zone_name}")

@@ -1,12 +1,13 @@
 @echo off
+chcp 65001 >nul 2>&1
 cls
 echo.
-echo ╔══════════════════════════════════════════════════════════════════════════╗
-echo ║                                                                          ║
-echo ║            🔥 FORGE-Guard Setup Wizard 🔥                                ║
-echo ║                 Elderly Safety Monitoring System                         ║
-echo ║                                                                          ║
-echo ╚══════════════════════════════════════════════════════════════════════════╝
+echo +============================================================================+
+echo ^|                                                                            ^|
+echo ^|            [FIRE] FORGE-Guard Setup Wizard [FIRE]                          ^|
+echo ^|                 Elderly Safety Monitoring System                           ^|
+echo ^|                                                                            ^|
+echo +============================================================================+
 echo.
 echo [INFO] Checking system requirements...
 echo.
@@ -120,20 +121,20 @@ if not exist ".env" (
 if not exist "logs" mkdir logs
 
 echo.
-echo ╔══════════════════════════════════════════════════════════════════════════╗
-echo ║                                                                          ║
-echo ║                    ✅ SETUP COMPLETE!                                    ║
-echo ║                                                                          ║
-echo ╠══════════════════════════════════════════════════════════════════════════╣
-echo ║                                                                          ║
-echo ║   To start FORGE-Guard, run:                                             ║
-echo ║                                                                          ║
-echo ║      run.bat                                                             ║
-echo ║                                                                          ║
-echo ║   Or manually:                                                           ║
-echo ║      .venv\Scripts\activate                                              ║
-echo ║      python main.py                                                      ║
-echo ║                                                                          ║
-echo ╚══════════════════════════════════════════════════════════════════════════╝
+echo +============================================================================+
+echo ^|                                                                            ^|
+echo ^|                    [SUCCESS] SETUP COMPLETE!                               ^|
+echo ^|                                                                            ^|
+echo +============================================================================+
+echo ^|                                                                            ^|
+echo ^|   To start FORGE-Guard, run:                                               ^|
+echo ^|                                                                            ^|
+echo ^|      run.bat                                                               ^|
+echo ^|                                                                            ^|
+echo ^|   Or manually:                                                             ^|
+echo ^|      .venv\Scripts\activate                                                ^|
+echo ^|      python main.py                                                        ^|
+echo ^|                                                                            ^|
+echo +============================================================================+
 echo.
 pause
