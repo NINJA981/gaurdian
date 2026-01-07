@@ -1,9 +1,10 @@
 @echo off
+chcp 65001 >nul 2>&1
 cls
 echo.
-echo ╔══════════════════════════════════════════════════════════════════════════╗
-echo ║            🔥 Starting FORGE-Guard 🔥                                    ║
-echo ╚══════════════════════════════════════════════════════════════════════════╝
+echo +============================================================================+
+echo ^|            [FIRE] Starting FORGE-Guard [FIRE]                              ^|
+echo +============================================================================+
 echo.
 
 :: Check if virtual environment exists
@@ -26,10 +27,10 @@ if %errorlevel% neq 0 (
 
 echo [INFO] Launching FORGE-Guard...
 echo.
-echo   📡 API Server:    http://localhost:8000
-echo   📊 Dashboard:     http://localhost:8501
-echo   📖 API Docs:      http://localhost:8000/docs
-echo   👤 Admin Panel:   http://localhost:8501 (Settings tab)
+echo   [*] API Server:    http://localhost:8000
+echo   [*] Dashboard:     http://localhost:8501
+echo   [*] API Docs:      http://localhost:8000/docs
+echo   [*] Admin Panel:   http://localhost:8501 (Settings tab)
 echo.
 echo   Press Ctrl+C to stop
 echo.

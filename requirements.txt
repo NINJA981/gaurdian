@@ -4,7 +4,7 @@
 # ============================================================================
 
 # =============================================================================
-# Core Computer Vision & ML (PINNED STABLE VERSIONS)
+# Core Computer Vision and ML (PINNED STABLE VERSIONS)
 # =============================================================================
 opencv-python==4.8.1.78
 mediapipe==0.10.9
@@ -25,21 +25,22 @@ starlette==0.36.3
 # =============================================================================
 # Dashboard (Streamlit Frontend)
 # =============================================================================
-streamlit==1.31.0
-streamlit-webrtc==0.47.1
-streamlit-option-menu==0.3.6
-streamlit-extras==0.3.6
+streamlit>=1.39.0
+streamlit-webrtc>=0.48.1
+streamlit-option-menu>=0.3.6
+streamlit-extras>=0.4.0
 
 # WebRTC dependencies
-av==11.0.0
+av>=12.0.0
+aiortc>=1.9.0
 
 # =============================================================================
-# Notifications & Alerts
+# Notifications and Alerts
 # =============================================================================
 twilio==8.10.0
 
 # =============================================================================
-# Configuration & Validation
+# Configuration and Validation
 # =============================================================================
 python-dotenv==1.0.0
 pydantic==2.5.3

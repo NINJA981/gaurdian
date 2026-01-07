@@ -1,34 +1,55 @@
 """
 FORGE-Guard Video Pipeline
-Multi-threaded producer-consumer architecture for real-time video processing.
+Production-ready multi-threaded producer-consumer architecture for real-time video processing.
 """
 
-import cv2
 import threading
 import time
-from typing import List, Optional, Callable, Any
-from dataclasses import dataclass
-import numpy as np
+import logging
+from typing import List, Optional, Callable, Any, Dict
+from dataclasses import dataclass, field
 
 from .frame_buffer import FrameBuffer, FrameData
 from ..config import config
+from ..utils.safe_imports import get_cv2, get_numpy
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+# Get safe modules
+cv2 = get_cv2()
+np = get_numpy()
 
 
 @dataclass
 class ProcessedFrame:
     """Container for processed frame with detection results."""
-    frame: np.ndarray
-    original_frame: np.ndarray
+    frame: Any  # np.ndarray
+    original_frame: Any  # np.ndarray
     frame_id: int
     timestamp: float
-    detections: dict
-    processing_time: float
+    detections: Dict[str, Any] = field(default_factory=dict)
+    processing_time: float = 0.0
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary (without frame data)."""
+        return {
+            "frame_id": self.frame_id,
+            "timestamp": self.timestamp,
+            "processing_time_ms": round(self.processing_time * 1000, 2),
+            "detection_count": len(self.detections)
+        }
 
 
 class FrameProducer(threading.Thread):
     """
     Producer thread that captures frames from camera
     and pushes them to the frame buffer.
+    
+    Features:
+    - Automatic camera reconnection
+    - FPS calculation
+    - Graceful error handling
     """
     
     def __init__(
@@ -37,17 +58,21 @@ class FrameProducer(threading.Thread):
         camera_index: int = 0,
         target_fps: int = 30,
         width: int = 1280,
-        height: int = 720
+        height: int = 720,
+        reconnect_delay: float = 2.0,
+        max_reconnect_attempts: int = 5
     ):
         """
         Initialize frame producer.
         
         Args:
             buffer: Frame buffer to push frames to
-            camera_index: Camera device index
+            camera_index: Camera device index (or RTSP URL)
             target_fps: Target frames per second
             width: Frame width
             height: Frame height
+            reconnect_delay: Seconds to wait before reconnection attempt
+            max_reconnect_attempts: Maximum reconnection attempts before giving up
         """
         super().__init__(name="FrameProducer", daemon=True)
         self.buffer = buffer
@@ -55,303 +80,454 @@ class FrameProducer(threading.Thread):
         self.target_fps = target_fps
         self.width = width
         self.height = height
+        self.reconnect_delay = reconnect_delay
+        self.max_reconnect_attempts = max_reconnect_attempts
         
         self._running = False
-        self._cap: Optional[cv2.VideoCapture] = None
-        self._frame_interval = 1.0 / target_fps
+        self._cap = None
+        self._frame_interval = 1.0 / max(target_fps, 1)
+        self._lock = threading.Lock()
+        
+        # Statistics
         self._actual_fps = 0.0
         self._last_frame_time = 0.0
+        self._frames_captured = 0
+        self._errors_count = 0
+        self._camera_opened = False
+        self._start_time: Optional[float] = None
+    
+    def _open_camera(self) -> bool:
+        """Attempt to open the camera."""
+        try:
+            if self._cap is not None:
+                self._cap.release()
+            
+            self._cap = cv2.VideoCapture(self.camera_index)
+            
+            if not self._cap.isOpened():
+                logger.error(f"[PRODUCER] Failed to open camera {self.camera_index}")
+                return False
+            
+            # Configure camera
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            self._cap.set(cv2.CAP_PROP_FPS, self.target_fps)
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
+            
+            self._camera_opened = True
+            logger.info(f"[PRODUCER] Camera initialized: {self.width}x{self.height} @ {self.target_fps}fps")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[PRODUCER] Camera initialization error: {e}")
+            return False
     
     def run(self):
         """Main producer loop."""
         self._running = True
-        self._cap = cv2.VideoCapture(self.camera_index)
+        self._start_time = time.time()
+        reconnect_attempts = 0
         
-        if not self._cap.isOpened():
-            print(f"[ERROR] Failed to open camera {self.camera_index}")
-            self._running = False
+        # Initial camera open
+        while self._running and not self._open_camera():
+            reconnect_attempts += 1
+            if reconnect_attempts >= self.max_reconnect_attempts:
+                logger.error("[PRODUCER] Max reconnection attempts reached. Stopping.")
+                self._running = False
+                return
+            logger.warning(f"[PRODUCER] Retrying camera connection ({reconnect_attempts}/{self.max_reconnect_attempts})...")
+            time.sleep(self.reconnect_delay)
+        
+        if not self._running:
             return
         
-        # Configure camera
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self._cap.set(cv2.CAP_PROP_FPS, self.target_fps)
-        self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
-        
-        print(f"[PRODUCER] Camera initialized: {self.width}x{self.height} @ {self.target_fps}fps")
-        
+        reconnect_attempts = 0
         fps_counter = 0
         fps_start_time = time.time()
         
         while self._running:
             loop_start = time.time()
             
-            ret, frame = self._cap.read()
-            if not ret:
-                print("[PRODUCER] Failed to read frame")
-                time.sleep(0.01)
-                continue
-            
-            self.buffer.push(frame)
-            self._last_frame_time = time.time()
-            
-            # Calculate actual FPS
-            fps_counter += 1
-            elapsed = time.time() - fps_start_time
-            if elapsed >= 1.0:
-                self._actual_fps = fps_counter / elapsed
-                fps_counter = 0
-                fps_start_time = time.time()
-            
-            # Maintain target FPS
-            processing_time = time.time() - loop_start
-            sleep_time = self._frame_interval - processing_time
-            if sleep_time > 0:
-                time.sleep(sleep_time)
+            try:
+                ret, frame = self._cap.read()
+                
+                if not ret or frame is None:
+                    self._errors_count += 1
+                    logger.warning("[PRODUCER] Failed to read frame")
+                    
+                    # Try to reconnect
+                    reconnect_attempts += 1
+                    if reconnect_attempts >= self.max_reconnect_attempts:
+                        logger.error("[PRODUCER] Max reconnection attempts reached. Stopping.")
+                        self._running = False
+                        break
+                    
+                    time.sleep(self.reconnect_delay)
+                    if self._open_camera():
+                        reconnect_attempts = 0
+                    continue
+                
+                # Reset reconnect counter on successful read
+                reconnect_attempts = 0
+                
+                # Push frame to buffer
+                self.buffer.push(frame)
+                
+                with self._lock:
+                    self._last_frame_time = time.time()
+                    self._frames_captured += 1
+                
+                # Calculate actual FPS
+                fps_counter += 1
+                elapsed = time.time() - fps_start_time
+                if elapsed >= 1.0:
+                    with self._lock:
+                        self._actual_fps = fps_counter / elapsed
+                    fps_counter = 0
+                    fps_start_time = time.time()
+                
+                # Frame rate limiting
+                processing_time = time.time() - loop_start
+                sleep_time = self._frame_interval - processing_time
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                    
+            except Exception as e:
+                self._errors_count += 1
+                logger.error(f"[PRODUCER] Frame capture error: {e}")
+                time.sleep(0.1)
         
-        self._cleanup()
-    
-    def stop(self):
-        """Stop the producer thread."""
-        self._running = False
-    
-    def _cleanup(self):
-        """Release camera resources."""
+        # Cleanup
         if self._cap is not None:
             self._cap.release()
             self._cap = None
-        print("[PRODUCER] Stopped and released camera")
+        self._camera_opened = False
+        logger.info("[PRODUCER] Stopped")
     
-    @property
-    def actual_fps(self) -> float:
-        """Current actual FPS."""
-        return self._actual_fps
+    def stop(self):
+        """Stop the producer."""
+        self._running = False
     
     @property
     def is_running(self) -> bool:
         """Check if producer is running."""
         return self._running
+    
+    @property
+    def actual_fps(self) -> float:
+        """Get actual frames per second."""
+        with self._lock:
+            return self._actual_fps
+    
+    def stats(self) -> dict:
+        """Get producer statistics."""
+        with self._lock:
+            uptime = time.time() - self._start_time if self._start_time else 0
+            return {
+                "running": self._running,
+                "camera_opened": self._camera_opened,
+                "frames_captured": self._frames_captured,
+                "actual_fps": round(self._actual_fps, 1),
+                "target_fps": self.target_fps,
+                "errors_count": self._errors_count,
+                "uptime_seconds": round(uptime, 1)
+            }
 
 
 class FrameConsumer(threading.Thread):
     """
     Consumer thread that processes frames from the buffer
-    using registered detection modules.
+    using registered detectors.
+    
+    Features:
+    - Multiple detector support
+    - Processing time tracking
+    - Callback for processed frames
     """
     
     def __init__(
         self,
         buffer: FrameBuffer,
+        detectors: Optional[List[Any]] = None,
         on_frame_processed: Optional[Callable[[ProcessedFrame], None]] = None
     ):
         """
         Initialize frame consumer.
         
         Args:
-            buffer: Frame buffer to consume frames from
+            buffer: Frame buffer to consume from
+            detectors: List of detector instances
             on_frame_processed: Callback for processed frames
         """
         super().__init__(name="FrameConsumer", daemon=True)
         self.buffer = buffer
+        self._detectors: List[Any] = detectors or []
         self.on_frame_processed = on_frame_processed
         
         self._running = False
-        self._detectors: List[Any] = []
-        self._actual_fps = 0.0
-        self._latest_frame: Optional[ProcessedFrame] = None
-        self._frame_lock = threading.Lock()
+        self._lock = threading.Lock()
+        
+        # Statistics
+        self._frames_processed = 0
+        self._total_processing_time = 0.0
+        self._last_processing_time = 0.0
+        self._start_time: Optional[float] = None
     
     def register_detector(self, detector):
-        """
-        Register a detection module.
-        
-        Args:
-            detector: Detector instance implementing BaseDetector interface
-        """
-        self._detectors.append(detector)
-        print(f"[CONSUMER] Registered detector: {detector.__class__.__name__}")
+        """Add a detector to the processing pipeline."""
+        with self._lock:
+            if detector not in self._detectors:
+                self._detectors.append(detector)
+                logger.info(f"[CONSUMER] Registered detector: {detector.name}")
+    
+    def unregister_detector(self, detector):
+        """Remove a detector from the pipeline."""
+        with self._lock:
+            if detector in self._detectors:
+                self._detectors.remove(detector)
+                logger.info(f"[CONSUMER] Unregistered detector: {detector.name}")
     
     def run(self):
         """Main consumer loop."""
         self._running = True
-        fps_counter = 0
-        fps_start_time = time.time()
-        
-        print(f"[CONSUMER] Started with {len(self._detectors)} detectors")
+        self._start_time = time.time()
+        logger.info("[CONSUMER] Started")
         
         while self._running:
-            frame_data = self.buffer.pop(timeout=0.5)
+            # Get frame from buffer
+            frame_data = self.buffer.pop(timeout=1.0)
             
             if frame_data is None:
                 continue
             
-            process_start = time.time()
+            start_time = time.time()
             
-            # Process frame through all detectors
-            detections = {}
-            display_frame = frame_data.frame.copy()
-            
-            for detector in self._detectors:
-                try:
-                    result = detector.detect(frame_data.frame)
-                    detections[detector.name] = result
-                    
-                    # Draw overlay on display frame
-                    if result.detected:
-                        display_frame = detector.draw_overlay(display_frame, result)
-                except Exception as e:
-                    print(f"[CONSUMER] Detector {detector.__class__.__name__} error: {e}")
-            
-            processing_time = time.time() - process_start
-            
-            # Create processed frame result
-            processed = ProcessedFrame(
-                frame=display_frame,
-                original_frame=frame_data.frame,
-                frame_id=frame_data.frame_id,
-                timestamp=frame_data.timestamp,
-                detections=detections,
-                processing_time=processing_time
-            )
-            
-            with self._frame_lock:
-                self._latest_frame = processed
-            
-            # Callback for processed frame
-            if self.on_frame_processed:
-                try:
-                    self.on_frame_processed(processed)
-                except Exception as e:
-                    print(f"[CONSUMER] Callback error: {e}")
-            
-            # Calculate actual FPS
-            fps_counter += 1
-            elapsed = time.time() - fps_start_time
-            if elapsed >= 1.0:
-                self._actual_fps = fps_counter / elapsed
-                fps_counter = 0
-                fps_start_time = time.time()
+            try:
+                # Run all detectors
+                detections = {}
+                processed_frame = frame_data.frame.copy() if np is not None else frame_data.frame
+                
+                with self._lock:
+                    detectors = self._detectors.copy()
+                
+                for detector in detectors:
+                    try:
+                        if detector.enabled:
+                            result = detector.detect(frame_data.frame)
+                            detections[detector.name] = result
+                            
+                            # Draw overlay
+                            if result is not None:
+                                processed_frame = detector.draw_overlay(processed_frame, result)
+                    except Exception as e:
+                        logger.error(f"[CONSUMER] Detector {detector.name} error: {e}")
+                        detections[detector.name] = None
+                
+                processing_time = time.time() - start_time
+                
+                # Create processed frame
+                result = ProcessedFrame(
+                    frame=processed_frame,
+                    original_frame=frame_data.frame,
+                    frame_id=frame_data.frame_id,
+                    timestamp=frame_data.timestamp,
+                    detections=detections,
+                    processing_time=processing_time
+                )
+                
+                # Update statistics
+                with self._lock:
+                    self._frames_processed += 1
+                    self._total_processing_time += processing_time
+                    self._last_processing_time = processing_time
+                
+                # Callback
+                if self.on_frame_processed:
+                    try:
+                        self.on_frame_processed(result)
+                    except Exception as e:
+                        logger.error(f"[CONSUMER] Callback error: {e}")
+                        
+            except Exception as e:
+                logger.error(f"[CONSUMER] Processing error: {e}")
         
-        print("[CONSUMER] Stopped")
+        logger.info("[CONSUMER] Stopped")
     
     def stop(self):
-        """Stop the consumer thread."""
+        """Stop the consumer."""
         self._running = False
-    
-    def get_latest_frame(self) -> Optional[ProcessedFrame]:
-        """Get the most recently processed frame."""
-        with self._frame_lock:
-            return self._latest_frame
-    
-    @property
-    def actual_fps(self) -> float:
-        """Current actual processing FPS."""
-        return self._actual_fps
     
     @property
     def is_running(self) -> bool:
         """Check if consumer is running."""
         return self._running
+    
+    def stats(self) -> dict:
+        """Get consumer statistics."""
+        with self._lock:
+            avg_time = (self._total_processing_time / self._frames_processed * 1000
+                       if self._frames_processed > 0 else 0)
+            uptime = time.time() - self._start_time if self._start_time else 0
+            return {
+                "running": self._running,
+                "frames_processed": self._frames_processed,
+                "avg_processing_time_ms": round(avg_time, 2),
+                "last_processing_time_ms": round(self._last_processing_time * 1000, 2),
+                "detector_count": len(self._detectors),
+                "uptime_seconds": round(uptime, 1)
+            }
 
 
 class VideoPipeline:
     """
-    Main video pipeline orchestrator.
-    Manages producer-consumer threads and detection modules.
+    Main video processing pipeline.
+    Manages producer, consumer, and detectors.
+    
+    Features:
+    - Easy start/stop lifecycle
+    - Detector registration
+    - Comprehensive statistics
     """
     
     def __init__(
         self,
         camera_index: Optional[int] = None,
+        buffer_size: Optional[int] = None,
+        target_fps: Optional[int] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
         on_frame_processed: Optional[Callable[[ProcessedFrame], None]] = None
     ):
         """
         Initialize video pipeline.
         
         Args:
-            camera_index: Camera device index (uses config if not specified)
+            camera_index: Camera device index (default from config)
+            buffer_size: Frame buffer size (default from config)
+            target_fps: Target FPS (default from config)
+            width: Frame width (default from config)
+            height: Frame height (default from config)
             on_frame_processed: Callback for processed frames
         """
-        self.camera_index = camera_index or config.video.camera_index
+        # Use config defaults
+        self.camera_index = camera_index if camera_index is not None else config.video.camera_index
+        self.buffer_size = buffer_size if buffer_size is not None else config.video.buffer_size
+        self.target_fps = target_fps if target_fps is not None else config.video.fps
+        self.width = width if width is not None else config.video.width
+        self.height = height if height is not None else config.video.height
         self.on_frame_processed = on_frame_processed
         
-        self.buffer = FrameBuffer(max_size=config.video.buffer_size)
-        
-        self.producer = FrameProducer(
-            buffer=self.buffer,
-            camera_index=self.camera_index,
-            target_fps=config.video.fps,
-            width=config.video.width,
-            height=config.video.height
-        )
-        
-        self.consumer = FrameConsumer(
-            buffer=self.buffer,
-            on_frame_processed=on_frame_processed
-        )
-        
+        # Create components
+        self._buffer = FrameBuffer(max_size=self.buffer_size)
+        self._producer: Optional[FrameProducer] = None
+        self._consumer: Optional[FrameConsumer] = None
+        self._detectors: List[Any] = []
         self._running = False
+        self._lock = threading.Lock()
+        self._start_time: Optional[float] = None
     
     def register_detector(self, detector):
-        """Register a detection module."""
-        self.consumer.register_detector(detector)
+        """Register a detector with the pipeline."""
+        with self._lock:
+            if detector not in self._detectors:
+                self._detectors.append(detector)
+                if self._consumer:
+                    self._consumer.register_detector(detector)
+                logger.info(f"[PIPELINE] Registered detector: {detector.name}")
+    
+    def unregister_detector(self, detector):
+        """Unregister a detector from the pipeline."""
+        with self._lock:
+            if detector in self._detectors:
+                self._detectors.remove(detector)
+                if self._consumer:
+                    self._consumer.unregister_detector(detector)
+                logger.info(f"[PIPELINE] Unregistered detector: {detector.name}")
     
     def start(self):
         """Start the video pipeline."""
         if self._running:
-            print("[PIPELINE] Already running")
+            logger.warning("[PIPELINE] Already running")
             return
         
-        print("[PIPELINE] Starting...")
+        logger.info("[PIPELINE] Starting...")
+        self._start_time = time.time()
+        
+        # Create producer
+        self._producer = FrameProducer(
+            buffer=self._buffer,
+            camera_index=self.camera_index,
+            target_fps=self.target_fps,
+            width=self.width,
+            height=self.height
+        )
+        
+        # Create consumer with detectors
+        self._consumer = FrameConsumer(
+            buffer=self._buffer,
+            detectors=self._detectors.copy(),
+            on_frame_processed=self.on_frame_processed
+        )
+        
+        # Start threads
+        self._producer.start()
+        self._consumer.start()
         self._running = True
-        self.producer.start()
-        self.consumer.start()
-        print("[PIPELINE] Started successfully")
+        
+        logger.info("[PIPELINE] Started successfully")
     
     def stop(self):
         """Stop the video pipeline."""
         if not self._running:
             return
         
-        print("[PIPELINE] Stopping...")
+        logger.info("[PIPELINE] Stopping...")
         self._running = False
         
-        self.producer.stop()
-        self.consumer.stop()
-        self.buffer.stop()
+        # Stop producer first
+        if self._producer:
+            self._producer.stop()
         
-        # Wait for threads to finish
-        if self.producer.is_alive():
-            self.producer.join(timeout=2.0)
-        if self.consumer.is_alive():
-            self.consumer.join(timeout=2.0)
+        # Stop buffer (releases consumer)
+        self._buffer.stop()
         
-        print("[PIPELINE] Stopped")
-    
-    def get_latest_frame(self) -> Optional[ProcessedFrame]:
-        """Get the most recently processed frame."""
-        return self.consumer.get_latest_frame()
-    
-    def stats(self) -> dict:
-        """Get pipeline statistics."""
-        return {
-            "buffer": self.buffer.stats(),
-            "producer_fps": self.producer.actual_fps,
-            "consumer_fps": self.consumer.actual_fps,
-            "running": self._running
-        }
+        # Stop consumer
+        if self._consumer:
+            self._consumer.stop()
+        
+        # Wait for threads
+        if self._producer and self._producer.is_alive():
+            self._producer.join(timeout=2.0)
+        if self._consumer and self._consumer.is_alive():
+            self._consumer.join(timeout=2.0)
+        
+        logger.info("[PIPELINE] Stopped")
     
     @property
     def is_running(self) -> bool:
         """Check if pipeline is running."""
         return self._running
     
-    def __enter__(self):
-        """Context manager entry."""
-        self.start()
-        return self
+    @property
+    def buffer(self) -> FrameBuffer:
+        """Get the frame buffer."""
+        return self._buffer
     
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.stop()
-        return False
+    @property
+    def detectors(self) -> List[Any]:
+        """Get registered detectors."""
+        with self._lock:
+            return self._detectors.copy()
+    
+    def stats(self) -> dict:
+        """Get pipeline statistics."""
+        uptime = time.time() - self._start_time if self._start_time else 0
+        return {
+            "running": self._running,
+            "uptime_seconds": round(uptime, 1),
+            "buffer": self._buffer.stats(),
+            "producer": self._producer.stats() if self._producer else None,
+            "consumer": self._consumer.stats() if self._consumer else None,
+            "detector_count": len(self._detectors),
+            "detectors": [d.name for d in self._detectors]
+        }

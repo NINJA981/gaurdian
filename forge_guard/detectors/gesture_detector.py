@@ -6,16 +6,19 @@ Detects SOS and help gestures for elderly assistance.
 
 import time
 import logging
+import threading
 from typing import Optional, Tuple, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 
-import numpy as np
-
 from .base_detector import BaseDetector, DetectionResult, AlertLevel
+from ..utils.safe_imports import get_numpy, get_mediapipe
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+# Get numpy
+np = get_numpy()
 
 # ============================================================================
 # SAFE MEDIAPIPE IMPORT
@@ -26,18 +29,17 @@ mp_hands = None
 mp_drawing = None
 
 try:
-    import mediapipe as mp
-    if hasattr(mp, 'solutions') and hasattr(mp.solutions, 'hands'):
+    mp = get_mediapipe()
+    if mp is not None and hasattr(mp, 'solutions') and hasattr(mp.solutions, 'hands'):
         mp_hands = mp.solutions.hands
         mp_drawing = mp.solutions.drawing_utils
         MEDIAPIPE_AVAILABLE = True
         logger.info("[GESTURE] MediaPipe Hands loaded successfully")
     else:
         logger.warning("[GESTURE] MediaPipe solutions not available")
-except ImportError as e:
-    logger.warning(f"[GESTURE] MediaPipe not installed: {e}")
 except Exception as e:
     logger.warning(f"[GESTURE] MediaPipe initialization error: {e}")
+
 
 # ============================================================================
 # GESTURE TYPES
@@ -84,6 +86,7 @@ class GestureDetector(BaseDetector):
     - Multi-hand tracking
     - Gesture hold time for confirmation
     - Graceful degradation when MediaPipe unavailable
+    - Thread-safe state management
     """
     
     def __init__(
@@ -112,6 +115,12 @@ class GestureDetector(BaseDetector):
         self._gesture_start_time: Optional[float] = None
         self._last_hands: List[HandInfo] = []
         self._wave_history: List[float] = []  # Track x positions for wave
+        self._state_lock = threading.Lock()
+        
+        # Statistics tracking
+        self._gesture_detections_count = 0
+        self._last_gesture_time: Optional[float] = None
+        self._gesture_counts: Dict[str, int] = {g.value: 0 for g in GestureType}
         
         # Initialize MediaPipe Hands
         self._init_hands()
@@ -136,7 +145,7 @@ class GestureDetector(BaseDetector):
             logger.error(f"[GESTURE] Failed to initialize Hands: {e}")
             self._enabled = False
     
-    def _process_frame(self, frame: np.ndarray) -> DetectionResult:
+    def _process_frame(self, frame) -> DetectionResult:
         """
         Process a frame for gesture detection.
         
@@ -146,7 +155,6 @@ class GestureDetector(BaseDetector):
         Returns:
             DetectionResult with detection status
         """
-        self._frames_processed += 1
         current_time = time.time()
         
         if not self._enabled or self._hands is None:
@@ -158,9 +166,18 @@ class GestureDetector(BaseDetector):
                 details={"status": "disabled", "reason": "MediaPipe unavailable"}
             )
         
+        if np is None:
+            return DetectionResult(
+                detected=False,
+                confidence=0.0,
+                message="Gesture detection offline",
+                alert_level=AlertLevel.NONE,
+                details={"status": "disabled", "reason": "NumPy unavailable"}
+            )
+        
         try:
             # Convert BGR to RGB
-            rgb_frame = frame[:, :, ::-1]
+            rgb_frame = frame[:, :, ::-1] if len(frame.shape) == 3 and frame.shape[2] == 3 else frame
             
             # Process frame
             results = self._hands.process(rgb_frame)
@@ -181,80 +198,16 @@ class GestureDetector(BaseDetector):
                 results.multi_handedness,
                 frame.shape
             )
-            self._last_hands = hands_info
+            
+            with self._state_lock:
+                self._last_hands = hands_info
             
             # Detect gesture
             detected_gesture = self._classify_gesture(hands_info, frame.shape)
             
             # Handle gesture state
-            if detected_gesture != GestureType.NONE:
-                if detected_gesture == self._current_gesture:
-                    # Same gesture - check hold time
-                    if self._gesture_start_time:
-                        hold_duration = current_time - self._gesture_start_time
-                        
-                        if hold_duration >= self.hold_time:
-                            # Gesture confirmed!
-                            self._detections_count += 1
-                            self._last_detection_time = current_time
-                            
-                            alert_level = self._get_gesture_alert_level(detected_gesture)
-                            message = self._get_gesture_message(detected_gesture)
-                            
-                            return DetectionResult(
-                                detected=True,
-                                confidence=max(h.confidence for h in hands_info),
-                                message=message,
-                                alert_level=alert_level,
-                                details={
-                                    "gesture": detected_gesture.value,
-                                    "hold_time": hold_duration,
-                                    "hands_detected": len(hands_info),
-                                    "confirmed": True
-                                }
-                            )
-                        else:
-                            # Still holding
-                            return DetectionResult(
-                                detected=True,
-                                confidence=max(h.confidence for h in hands_info) * 0.7,
-                                message=f"Holding {detected_gesture.value} ({hold_duration:.1f}s)",
-                                alert_level=AlertLevel.MEDIUM,
-                                details={
-                                    "gesture": detected_gesture.value,
-                                    "hold_time": hold_duration,
-                                    "required_time": self.hold_time,
-                                    "confirmed": False
-                                }
-                            )
-                else:
-                    # New gesture detected
-                    self._current_gesture = detected_gesture
-                    self._gesture_start_time = current_time
-                    
-                    return DetectionResult(
-                        detected=True,
-                        confidence=max(h.confidence for h in hands_info) * 0.5,
-                        message=f"Gesture detected: {detected_gesture.value}",
-                        alert_level=AlertLevel.LOW,
-                        details={
-                            "gesture": detected_gesture.value,
-                            "status": "detecting"
-                        }
-                    )
-            else:
-                self._reset_gesture_state()
-                return DetectionResult(
-                    detected=False,
-                    confidence=max(h.confidence for h in hands_info) if hands_info else 0.0,
-                    message=f"Hands visible ({len(hands_info)})",
-                    alert_level=AlertLevel.NONE,
-                    details={
-                        "hands_detected": len(hands_info),
-                        "status": "monitoring"
-                    }
-                )
-                
+            return self._handle_gesture_state(detected_gesture, hands_info, current_time)
+            
         except Exception as e:
             logger.error(f"[GESTURE] Processing error: {e}")
             return DetectionResult(
@@ -265,6 +218,83 @@ class GestureDetector(BaseDetector):
                 details={"status": "error", "error": str(e)}
             )
     
+    def _handle_gesture_state(self, detected_gesture: GestureType, 
+                              hands_info: List[HandInfo], current_time: float) -> DetectionResult:
+        """Handle gesture state machine and return appropriate result."""
+        with self._state_lock:
+            if detected_gesture != GestureType.NONE:
+                if detected_gesture == self._current_gesture:
+                    # Same gesture continues
+                    if self._gesture_start_time is None:
+                        self._gesture_start_time = current_time
+                    
+                    hold_duration = current_time - self._gesture_start_time
+                    
+                    if hold_duration >= self.hold_time:
+                        # Gesture confirmed!
+                        self._gesture_detections_count += 1
+                        self._last_gesture_time = current_time
+                        self._gesture_counts[detected_gesture.value] += 1
+                        
+                        alert_level = self._get_gesture_alert_level(detected_gesture)
+                        message = self._get_gesture_message(detected_gesture)
+                        
+                        return DetectionResult(
+                            detected=True,
+                            confidence=max((h.confidence for h in hands_info), default=0.0),
+                            message=message,
+                            alert_level=alert_level,
+                            details={
+                                "gesture": detected_gesture.value,
+                                "hold_time": round(hold_duration, 2),
+                                "hands_detected": len(hands_info),
+                                "confirmed": True
+                            }
+                        )
+                    else:
+                        # Still holding - not yet confirmed
+                        return DetectionResult(
+                            detected=True,
+                            confidence=max((h.confidence for h in hands_info), default=0.0) * 0.7,
+                            message=f"Holding {detected_gesture.value} ({hold_duration:.1f}s / {self.hold_time}s)",
+                            alert_level=AlertLevel.MEDIUM,
+                            details={
+                                "gesture": detected_gesture.value,
+                                "hold_time": round(hold_duration, 2),
+                                "required_time": self.hold_time,
+                                "progress": round(hold_duration / self.hold_time * 100, 1),
+                                "confirmed": False
+                            }
+                        )
+                else:
+                    # New gesture detected - start timing
+                    self._current_gesture = detected_gesture
+                    self._gesture_start_time = current_time
+                    
+                    return DetectionResult(
+                        detected=True,
+                        confidence=max((h.confidence for h in hands_info), default=0.0) * 0.5,
+                        message=f"Gesture detected: {detected_gesture.value}",
+                        alert_level=AlertLevel.LOW,
+                        details={
+                            "gesture": detected_gesture.value,
+                            "status": "detecting"
+                        }
+                    )
+            else:
+                # No gesture - reset state
+                self._reset_gesture_state_locked()
+                return DetectionResult(
+                    detected=False,
+                    confidence=max((h.confidence for h in hands_info), default=0.0) if hands_info else 0.0,
+                    message=f"Hands visible ({len(hands_info)})",
+                    alert_level=AlertLevel.NONE,
+                    details={
+                        "hands_detected": len(hands_info),
+                        "status": "monitoring"
+                    }
+                )
+    
     def _analyze_hands(self, landmarks_list, handedness_list, frame_shape) -> List[HandInfo]:
         """Analyze detected hands and extract information."""
         hands = []
@@ -274,10 +304,8 @@ class GestureDetector(BaseDetector):
             hand_label = handedness.classification[0].label
             confidence = handedness.classification[0].score
             
-            # Get key landmarks
+            # Get wrist landmark
             wrist = landmarks.landmark[0]
-            index_tip = landmarks.landmark[8]
-            middle_tip = landmarks.landmark[12]
             
             # Check if hand is raised (wrist above middle of frame)
             is_raised = wrist.y < 0.5
@@ -380,26 +408,32 @@ class GestureDetector(BaseDetector):
         avg_x = sum(h.landmarks.landmark[0].x for h in raised) / len(raised)
         
         # Add to history
-        self._wave_history.append(avg_x)
-        if len(self._wave_history) > 20:
-            self._wave_history = self._wave_history[-20:]
-        
-        # Detect oscillation in history
-        if len(self._wave_history) >= 10:
-            direction_changes = 0
-            for i in range(2, len(self._wave_history)):
-                prev_dir = self._wave_history[i-1] - self._wave_history[i-2]
-                curr_dir = self._wave_history[i] - self._wave_history[i-1]
-                if prev_dir * curr_dir < 0:  # Direction changed
-                    direction_changes += 1
+        with self._state_lock:
+            self._wave_history.append(avg_x)
+            if len(self._wave_history) > 20:
+                self._wave_history = self._wave_history[-20:]
             
-            # Wave detected if multiple direction changes
-            return direction_changes >= 3
+            # Detect oscillation in history
+            if len(self._wave_history) >= 10:
+                direction_changes = 0
+                for i in range(2, len(self._wave_history)):
+                    prev_dir = self._wave_history[i-1] - self._wave_history[i-2]
+                    curr_dir = self._wave_history[i] - self._wave_history[i-1]
+                    if prev_dir * curr_dir < 0:  # Direction changed
+                        direction_changes += 1
+                
+                # Wave detected if multiple direction changes
+                return direction_changes >= 3
         
         return False
     
     def _reset_gesture_state(self):
-        """Reset gesture tracking state."""
+        """Reset gesture tracking state (acquires lock)."""
+        with self._state_lock:
+            self._reset_gesture_state_locked()
+    
+    def _reset_gesture_state_locked(self):
+        """Reset gesture tracking state (assumes lock is held)."""
         self._current_gesture = GestureType.NONE
         self._gesture_start_time = None
     
@@ -425,7 +459,7 @@ class GestureDetector(BaseDetector):
         }
         return messages.get(gesture, "Gesture detected")
     
-    def draw_overlay(self, frame: np.ndarray, result: DetectionResult) -> np.ndarray:
+    def draw_overlay(self, frame, result: DetectionResult):
         """Draw gesture overlay on frame."""
         try:
             cv2 = __import__('cv2')
@@ -437,31 +471,47 @@ class GestureDetector(BaseDetector):
             else:
                 color = (0, 255, 0)
             
-            cv2.rectangle(overlay, (frame.shape[1] - 260, 10), 
-                         (frame.shape[1] - 10, 60), (0, 0, 0), -1)
-            cv2.rectangle(overlay, (frame.shape[1] - 260, 10), 
-                         (frame.shape[1] - 10, 60), color, 2)
+            h, w = frame.shape[:2]
+            cv2.rectangle(overlay, (w - 260, 10), (w - 10, 70), (0, 0, 0), -1)
+            cv2.rectangle(overlay, (w - 260, 10), (w - 10, 70), color, 2)
             
             # Status text
             gesture_name = result.details.get('gesture', 'monitoring')
             cv2.putText(overlay, f"Gesture: {gesture_name}", 
-                       (frame.shape[1] - 250, 40),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                       (w - 250, 35),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            
+            # Progress bar for hold time
+            if 'progress' in result.details:
+                progress = result.details['progress'] / 100
+                bar_width = int(230 * progress)
+                cv2.rectangle(overlay, (w - 250, 50), (w - 250 + bar_width, 60), color, -1)
+                cv2.rectangle(overlay, (w - 250, 50), (w - 20, 60), color, 1)
             
             # Draw hand landmarks if available
-            if MEDIAPIPE_AVAILABLE and self._last_hands:
-                for hand in self._last_hands:
-                    if hand.landmarks:
-                        mp_drawing.draw_landmarks(
-                            overlay,
-                            hand.landmarks,
-                            mp_hands.HAND_CONNECTIONS
-                        )
+            if MEDIAPIPE_AVAILABLE:
+                with self._state_lock:
+                    for hand in self._last_hands:
+                        if hand.landmarks:
+                            mp_drawing.draw_landmarks(
+                                overlay,
+                                hand.landmarks,
+                                mp_hands.HAND_CONNECTIONS
+                            )
             
             return overlay
             
-        except Exception:
+        except Exception as e:
+            logger.error(f"[GESTURE] Overlay error: {e}")
             return frame
+    
+    def reset(self):
+        """Reset detector state."""
+        super().reset()
+        self._reset_gesture_state()
+        with self._state_lock:
+            self._wave_history.clear()
+            self._last_hands.clear()
     
     def cleanup(self):
         """Clean up resources."""
@@ -472,9 +522,12 @@ class GestureDetector(BaseDetector):
     def stats(self) -> Dict[str, Any]:
         """Get detector statistics."""
         base_stats = super().stats()
-        base_stats.update({
-            "mediapipe_available": MEDIAPIPE_AVAILABLE,
-            "hold_time": self.hold_time,
-            "current_gesture": self._current_gesture.value if self._current_gesture else "none"
-        })
+        with self._state_lock:
+            base_stats.update({
+                "mediapipe_available": MEDIAPIPE_AVAILABLE,
+                "hold_time": self.hold_time,
+                "current_gesture": self._current_gesture.value,
+                "gesture_confirmations": self._gesture_detections_count,
+                "gesture_counts": dict(self._gesture_counts)
+            })
         return base_stats
